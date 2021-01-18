@@ -127,8 +127,10 @@ int main(int argc, char* argv[]) {
 	checkpointc();
 	cudaMemcpy(dsrc1, src1, sizeof(float) * xa * ya, cudaMemcpyHostToDevice);
 	cudaMemcpy(dsrc2, src2, sizeof(float) * za * wa, cudaMemcpyHostToDevice);
+	cudaDeviceSynchronize();
 	clock_t pretime = clock();
 	dotg<<<grids, blocks>>>(dstd, dsrc1, dsrc2, xa, ya, za, wa);
+	cudaDeviceSynchronize();
 	clock_t aftime = clock();
 	double coretime = 1e3 * ((aftime - pretime) / (double)CLOCKS_PER_SEC);
 	cudaMemcpy(dstc2, dstd, sizeof(float) * aa, cudaMemcpyDeviceToHost);
