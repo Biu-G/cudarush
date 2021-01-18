@@ -24,11 +24,21 @@ void dotc(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
 	}
 }
 
+double checkpointc(int us = 1e3) {
+	static clock_t timer = -1;
+	clock_t newtime = clock();
+	double ustime = us * ((newtime - timer) / (double)CLOCKS_PER_SEC);
+	timer = newtime;
+	return ustime;
+}
+	
+
 int main(int argc, char* argv[]) {
-	int xa = argc > 1 ? std::atoi(argv[1]) : 2;
-  int ya = argc > 2 ? std::atoi(argv[2]) : 2;
-	int za = argc > 3 ? std::atoi(argv[3]) : 2;
-  int wa = argc > 4 ? std::atoi(argv[4]) : 2;
+	const int defdim = 89;
+	int xa = argc > 1 ? std::atoi(argv[1]) : defdim;
+  int ya = argc > 2 ? std::atoi(argv[2]) : defdim;
+	int za = argc > 3 ? std::atoi(argv[3]) : defdim;
+  int wa = argc > 4 ? std::atoi(argv[4]) : defdim;
 	float* src1 = (float*)malloc(sizeof(float) * xa * ya);
 	float* src2 = (float*)malloc(sizeof(float) * za * wa);
 	float* dst = (float*)malloc(sizeof(float)* xa * ya * za * wa);
@@ -50,14 +60,17 @@ int main(int argc, char* argv[]) {
 		std::cout<<std::endl;
 	}
 	std::cout<<"SRC -> DST"<<std::endl;
+	checkpointc();
 	dotc(dst, src1 ,src2, xa, ya, za, wa);
+	double ctime = checkpointc();
 	std::cout<<"******CPU DST*********"<<std::endl;
 	int xza = xa * za;
 	int ywa = ya * wa;
-	for(int xzi = 0; xzi < xza; xzi++) {
+	/*for(int xzi = 0; xzi < xza; xzi++) {
 		for(int ywi = 0; ywi < ywa; ywi++) {
 			std::cout<<dst[xzi * ywa + ywi]<<" ";
 		}
 		std::cout<<std::endl;
-	}
+	}*/
+	std::cout<<"CTIME: "<<ctime<<std::endl;
 }
