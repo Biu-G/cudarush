@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
 	std::cout<<"SRC -> DST"<<std::endl;
 	checkpointc();
 	dotc(dst, src1 ,src2, xa, ya, za, wa);
-	double ctime = checkpointc();
+	double cstime = checkpointc();
 	std::cout<<"******CPU DST*********"<<std::endl;
 	int xza = xa * za;
 	int ywa = ya * wa;
@@ -72,5 +72,5 @@ int main(int argc, char* argv[]) {
 		}
 		std::cout<<std::endl;
 	}*/
-	std::cout<<"CTIME: "<<ctime<<std::endl;
+	std::cout<<"CSTIME: "<<cstime<<std::endl;
 }
