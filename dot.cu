@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
 #endif
 	printf("DOTMUL: %d^%d * %d^%d\n", xa, ya, za, wa);
 	std::cout<<"CSTIME: "<<cstime<<std::endl;
-	std::cout<<"DSTIME+CPY: "<<dstime<<std::endl;
+	std::cout<<"CPY-DET: "<<dstime - coretime<<std::endl;
 	std::cout<<"CORETIME: "<<coretime<<std::endl;
 	bool alc = allclose(dstc, dstc2, aa);
 	std::cout<<"ALC: "<<alc<<std::endl;
