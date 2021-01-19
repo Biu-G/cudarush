@@ -3,6 +3,7 @@
 #include <memory>
 #include "cuda.h"
 #define PR
+#define CEIL(x,y) ((x+y-1)/y)
 bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
 }
@@ -65,14 +66,24 @@ __global__ void dotgs(float*dst, float*src1, float*src2, int xa, int ya, int za,
   int ywa = ya * wa;
 	int xi = blockIdx.x;
 	int yi = blockIdx.y;
-	int zi = threadIdx.x;
-	int wi = threadIdx.y;
+	int ze = CEIL(za, blockDim.x);
+	int we = CEIL(wa, blockDim.y);
+	int zbase = threadIdx.x * ze;
+	int wbase = threadIdx.y * we;
+	for(int zi = zbase; zi < zbase + ze; zi++ )	{
+		for(int wi = wbase; wi < wbase + we; wi++) {
+			if(zi < za) {
+				if(wi < wa) {
           int xzi = xi * za + zi;
           int ywi = yi * wa + wi;
           int ii = xzi * ywa + ywi;
           int xyi = xi * ya + yi;
           int zwi = zi * wa + wi;
           dst[ii] = src1[xyi] * src2[zwi];
+				}
+			}
+		}
+	}
 }
 
 double checkpointc(int us = 1e3) {
@@ -85,11 +96,12 @@ double checkpointc(int us = 1e3) {
 	
 
 int main(int argc, char* argv[]) {
-	const int defdim = 32;
-	int xa = argc > 1 ? std::atoi(argv[1]) : defdim;
-  int ya = argc > 2 ? std::atoi(argv[2]) : defdim;
-	int za = argc > 3 ? std::atoi(argv[3]) : defdim;
-  int wa = argc > 4 ? std::atoi(argv[4]) : defdim;
+	const int defdim = 39;
+	int persq = argc > 1 ? std::min(std::atoi(argv[1]), 32) : 8;
+	int xa = argc > 2 ? std::atoi(argv[2]) : defdim;
+  int ya = argc > 3 ? std::atoi(argv[3]) : xa;
+	int za = argc > 4 ? std::atoi(argv[4]) : ya;
+  int wa = argc > 5 ? std::atoi(argv[5]) : za;
 	int aa = xa * ya * za * wa;
 	float* src1 = (float*)malloc(sizeof(float) * xa * ya);
 	float* src2 = (float*)malloc(sizeof(float) * za * wa);
@@ -138,8 +150,8 @@ int main(int argc, char* argv[]) {
 	grids.x = xa;
 	grids.y = ya;
 	grids.z = 1;
-	blocks.x = za;
-	blocks.y = wa;
+	blocks.x = persq;
+	blocks.y = persq;
 	blocks.z = 1;
 	std::cout<<"SRC -> GPU ->DST"<<std::endl;
 	checkpointc();
@@ -166,7 +178,9 @@ int main(int argc, char* argv[]) {
 	std::cout<<"CSTIME: "<<cstime<<std::endl;
 	std::cout<<"CPY-DET: "<<dstime - coretime<<std::endl;
 	std::cout<<"CORETIME: "<<coretime<<std::endl;
-	std::cout<<"PARA GPU 20X"<<std::endl;
+	std::cout<<"PARA GPU 0.05X"<<std::endl;
+	std::cout<<"TOTAL SPLIT 12X"<<std::endl;
+	std::cout<<"GPU BENCHMARK "<<cstime / coretime<<" X"<<std::endl;
 	bool alc = allclose(dstc, dstc2, aa);
 	std::cout<<"ALC: "<<alc<<std::endl;
 }
