@@ -13,6 +13,8 @@ bool allclose(float*x, float*y, int s) {
 		float fy = y[i];
 		bool fc = fcc(fx, fy);
 		if(!fc) {
+			std::cout<<"ALC ERR for id "<<i<<std::endl;
+			std::cout<<"FX VS FY "<<fx<<" "<<fy<<std::endl;
 			return false;
 		}
 	}
@@ -57,6 +59,22 @@ void dotc(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
 	}
 }
 
+__global__ void dotgs(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
+  // xy * zw -> xz * yw
+	// blockIdx.x = x, blockIdx.y = y, threadIdx.x = z, threadIdx.y = w
+  int ywa = ya * wa;
+	int xi = blockIdx.x;
+	int yi = blockIdx.y;
+	int zi = threadIdx.x;
+	int wi = threadIdx.y;
+          int xzi = xi * za + zi;
+          int ywi = yi * wa + wi;
+          int ii = xzi * ywa + ywi;
+          int xyi = xi * ya + yi;
+          int zwi = zi * wa + wi;
+          dst[ii] = src1[xyi] * src2[zwi];
+}
+
 double checkpointc(int us = 1e3) {
 	static clock_t timer = -1;
 	clock_t newtime = clock();
@@ -67,7 +85,7 @@ double checkpointc(int us = 1e3) {
 	
 
 int main(int argc, char* argv[]) {
-	const int defdim = 39;
+	const int defdim = 32;
 	int xa = argc > 1 ? std::atoi(argv[1]) : defdim;
   int ya = argc > 2 ? std::atoi(argv[2]) : defdim;
 	int za = argc > 3 ? std::atoi(argv[3]) : defdim;
@@ -117,11 +135,11 @@ int main(int argc, char* argv[]) {
 	}
 #endif
 	dim3 grids, blocks;
-	grids.x = 1;
-	grids.y = 1;
+	grids.x = xa;
+	grids.y = ya;
 	grids.z = 1;
-	blocks.x = 1;
-	blocks.y = 1;
+	blocks.x = za;
+	blocks.y = wa;
 	blocks.z = 1;
 	std::cout<<"SRC -> GPU ->DST"<<std::endl;
 	checkpointc();
@@ -129,7 +147,7 @@ int main(int argc, char* argv[]) {
 	cudaMemcpy(dsrc2, src2, sizeof(float) * za * wa, cudaMemcpyHostToDevice);
 	cudaDeviceSynchronize();
 	clock_t pretime = clock();
-	dotg<<<grids, blocks>>>(dstd, dsrc1, dsrc2, xa, ya, za, wa);
+	dotgs<<<grids, blocks>>>(dstd, dsrc1, dsrc2, xa, ya, za, wa);
 	cudaDeviceSynchronize();
 	clock_t aftime = clock();
 	double coretime = 1e3 * ((aftime - pretime) / (double)CLOCKS_PER_SEC);
@@ -148,6 +166,7 @@ int main(int argc, char* argv[]) {
 	std::cout<<"CSTIME: "<<cstime<<std::endl;
 	std::cout<<"CPY-DET: "<<dstime - coretime<<std::endl;
 	std::cout<<"CORETIME: "<<coretime<<std::endl;
+	std::cout<<"PARA GPU 20X"<<std::endl;
 	bool alc = allclose(dstc, dstc2, aa);
 	std::cout<<"ALC: "<<alc<<std::endl;
 }
