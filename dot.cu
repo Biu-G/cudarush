@@ -1,9 +1,11 @@
 #include <iostream>
 #include <cstdio>
 #include <memory>
+#include <assert.h>
 #include "cuda.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
+#define SWAPMAX 2
 bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
 }
@@ -86,25 +88,35 @@ __global__ void dotgs(float*dst, float*src1, float*src2, int xa, int ya, int za,
 	}
 }
 
-__global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
+__global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa, int zbias, int wbias) {
 	// xy * zw -> xz * yw
   // blockIdx.x = x, blockIdx.y = y, threadIdx.x = z, threadIdx.y = w
-	const int swapsize = 50 * 50;
+	const int swapsize = SWAPMAX * SWAPMAX;
 	__shared__ float swapzone[swapsize];
   int ywa = ya * wa;
   int xi = blockIdx.x;
   int yi = blockIdx.y;
-  int ze = CEIL(za, blockDim.x);
-  int we = CEIL(wa, blockDim.y);
-  int zbase = threadIdx.x * ze;
-  int wbase = threadIdx.y * we;
+  int ze = min(SWAPMAX, CEIL(za, blockDim.x));
+  int we = min(SWAPMAX, CEIL(wa, blockDim.y));
+  int zbase = threadIdx.x * ze + zbias;
+  int wbase = threadIdx.y * we + wbias;
+	// printf("HITTING PRE: zbase / ze / wbase / we: %d %d %d %d\n", zbase, ze, wbase, we);
   for(int zi = zbase; zi < zbase + ze; zi++ ) {
     for(int wi = wbase; wi < wbase + we; wi++) {
+			// printf("TRYING zi / wi vs za / wa: %d / %d vs %d / %d BINGO ? %d\n", zi, wi, za, wa, (zi < za) && (wi < wa));
       if(zi < za) {
         if(wi < wa) {
+					// printf("BINGOING LAYER 2\n");
           int xyi = xi * ya + yi;
           int zwi = zi * wa + wi;
-          swapzone[zwi] = src1[xyi] * src2[zwi];
+					// printf("LAYER 2 STATUS 2\n");
+					int zwibias = (zi - zbias) * SWAPMAX + (wi - wbias);
+					// printf("LAYER 2 STATUS 3\n");
+					printf("ZWIBIAS %d = (%d * %d)\n", zwibias, zi - zbias, wi - wbias);
+					assert(zwibias < swapsize);
+          swapzone[zwibias] = src1[xyi] * src2[zwi];
+					// printf("LAYER 2 STATUS 4\n");
+					// printf("HITTING ZWIBIAS: %d\n", zwibias);
         }
       }
     }
@@ -118,7 +130,8 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
           int ywi = yi * wa + wi;
           int ii = xzi * ywa + ywi;
           int zwi = zi * wa + wi;
-          dst[ii] = swapzone[zwi];
+					int zwibias = (zi - zbias) * wa + (wi - wbias);
+          dst[ii] = swapzone[zwibias];
         }
       }
     }
@@ -135,7 +148,7 @@ double checkpointc(int us = 1e3) {
 	
 
 int main(int argc, char* argv[]) {
-	const int defdim = 39;
+	const int defdim = SWAPMAX;
 	int persq = argc > 1 ? std::min(std::atoi(argv[1]), 32) : 8;
 	int xa = argc > 2 ? std::atoi(argv[2]) : defdim;
   int ya = argc > 3 ? std::atoi(argv[3]) : xa;
@@ -227,11 +240,19 @@ int main(int argc, char* argv[]) {
 	std::cout<<"XS NOW"<<std::endl;
 	cudaDeviceSynchronize();
 	checkpointc();
-	dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa);
-	cudaDeviceSynchronize();
-	double xstime = checkpointc();
+	double xstime = 0;
+	for(int zi = 0; zi < za; zi +=SWAPMAX) {
+		for(int wi = 0; wi < wa; wi +=SWAPMAX) {
+			std::cout<<"DUP CAL for zbias / wbias "<<zi<<" / "<<wi<<std::endl;
+			dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa, zi, wi);
+			cudaDeviceSynchronize();
+			double sxstime = checkpointc();
+			std::cout<<"TIMING: "<<sxstime<<std::endl;
+			xstime += sxstime;
+		}
+	}
 	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
-#if 0 
+#if 1 
   for(int xzi = 0; xzi < xza; xzi++) {
     for(int ywi = 0; ywi < ywa; ywi++) {
       std::cout<<dstc3[xzi * ywa + ywi]<<" ";
