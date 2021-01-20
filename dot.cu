@@ -86,6 +86,45 @@ __global__ void dotgs(float*dst, float*src1, float*src2, int xa, int ya, int za,
 	}
 }
 
+__global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
+	// xy * zw -> xz * yw
+  // blockIdx.x = x, blockIdx.y = y, threadIdx.x = z, threadIdx.y = w
+	const int swapsize = 50 * 50;
+	__shared__ float swapzone[swapsize];
+  int ywa = ya * wa;
+  int xi = blockIdx.x;
+  int yi = blockIdx.y;
+  int ze = CEIL(za, blockDim.x);
+  int we = CEIL(wa, blockDim.y);
+  int zbase = threadIdx.x * ze;
+  int wbase = threadIdx.y * we;
+  for(int zi = zbase; zi < zbase + ze; zi++ ) {
+    for(int wi = wbase; wi < wbase + we; wi++) {
+      if(zi < za) {
+        if(wi < wa) {
+          int xyi = xi * ya + yi;
+          int zwi = zi * wa + wi;
+          swapzone[zwi] = src1[xyi] * src2[zwi];
+        }
+      }
+    }
+  }
+	__syncthreads();
+  for(int zi = zbase; zi < zbase + ze; zi++ ) {
+    for(int wi = wbase; wi < wbase + we; wi++) {
+      if(zi < za) {
+        if(wi < wa) {
+          int xzi = xi * za + zi;
+          int ywi = yi * wa + wi;
+          int ii = xzi * ywa + ywi;
+          int zwi = zi * wa + wi;
+          dst[ii] = swapzone[zwi];
+        }
+      }
+    }
+  }
+}
+
 double checkpointc(int us = 1e3) {
 	static clock_t timer = -1;
 	clock_t newtime = clock();
@@ -106,14 +145,16 @@ int main(int argc, char* argv[]) {
 	float* src1 = (float*)malloc(sizeof(float) * xa * ya);
 	float* src2 = (float*)malloc(sizeof(float) * za * wa);
 	float* dstc = (float*)malloc(sizeof(float)* xa * ya * za * wa);
-	float* dsrc1, *dsrc2, *dstd;
+	float* dsrc1, *dsrc2, *dstd, *dstd2;
 	cudaMalloc((void**)&dsrc1, sizeof(float) * xa * ya);
   cudaMalloc((void**)&dsrc2, sizeof(float) * za * wa);
 	cudaMalloc((void**)&dstd, sizeof(float) * aa);
+	cudaMalloc((void**)&dstd2, sizeof(float) * aa);
   /*float* dsrc1 = (float*)malloc(sizeof(float) * xa * ya);
   float* dsrc2 = (float*)malloc(sizeof(float) * za * wa);
 	float* dstd = (float*)malloc(sizeof(float)* xa * ya * za * wa);*/
 	float* dstc2 = (float*)malloc(sizeof(float)* aa);
+	float* dstc3 = (float*)malloc(sizeof(float)* aa);
 	std::cout<<"------SRC1 / SRC2--------"<<std::endl;
 	for(int xi = 0; xi < xa; xi++) {
 		for(int yi = 0; yi < ya; yi++) {
@@ -174,6 +215,7 @@ int main(int argc, char* argv[]) {
     std::cout<<std::endl;
   }
 #endif
+	bool alc = allclose(dstc, dstc2, aa);
 	printf("DOTMUL: %d^%d * %d^%d\n", xa, ya, za, wa);
 	std::cout<<"CSTIME: "<<cstime<<std::endl;
 	std::cout<<"CPY-DET: "<<dstime - coretime<<std::endl;
@@ -181,6 +223,22 @@ int main(int argc, char* argv[]) {
 	std::cout<<"PARA GPU 0.05X"<<std::endl;
 	std::cout<<"TOTAL SPLIT 12X"<<std::endl;
 	std::cout<<"GPU BENCHMARK "<<cstime / coretime<<" X"<<std::endl;
-	bool alc = allclose(dstc, dstc2, aa);
 	std::cout<<"ALC: "<<alc<<std::endl;
+	std::cout<<"XS NOW"<<std::endl;
+	cudaDeviceSynchronize();
+	checkpointc();
+	dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa);
+	double xstime = checkpointc();
+	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
+#if 0 
+  for(int xzi = 0; xzi < xza; xzi++) {
+    for(int ywi = 0; ywi < ywa; ywi++) {
+      std::cout<<dstc3[xzi * ywa + ywi]<<" ";
+    }
+    std::cout<<std::endl;
+  }
+#endif
+	bool alc2 = allclose(dstc, dstc3, aa);
+	std::cout<<"XS BENCHMARK "<< cstime / xstime <<" X"<<std::endl;
+	std::cout<<"XS ALC "<< alc2<<std::endl;
 }
