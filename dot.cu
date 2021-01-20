@@ -5,7 +5,7 @@
 #include "cuda.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
-#define SWAPMAX 2
+#define SWAPMAX 40
 bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
 }
@@ -96,23 +96,25 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
   int ywa = ya * wa;
   int xi = blockIdx.x;
   int yi = blockIdx.y;
-  int ze = min(SWAPMAX, CEIL(za, blockDim.x));
-  int we = min(SWAPMAX, CEIL(wa, blockDim.y));
+	int zas = min(za, SWAPMAX);
+	int was = min(wa, SWAPMAX);
+  int ze = CEIL(zas, blockDim.x);
+  int we = CEIL(was, blockDim.y);
   int zbase = threadIdx.x * ze + zbias;
   int wbase = threadIdx.y * we + wbias;
 	// printf("HITTING PRE: zbase / ze / wbase / we: %d %d %d %d\n", zbase, ze, wbase, we);
   for(int zi = zbase; zi < zbase + ze; zi++ ) {
     for(int wi = wbase; wi < wbase + we; wi++) {
 			// printf("TRYING zi / wi vs za / wa: %d / %d vs %d / %d BINGO ? %d\n", zi, wi, za, wa, (zi < za) && (wi < wa));
-      if(zi < za) {
-        if(wi < wa) {
+      if(zi < zbias + zas && zi < za) {
+        if(wi < wbias + was && wi < wa) {
 					// printf("BINGOING LAYER 2\n");
           int xyi = xi * ya + yi;
           int zwi = zi * wa + wi;
 					// printf("LAYER 2 STATUS 2\n");
 					int zwibias = (zi - zbias) * SWAPMAX + (wi - wbias);
 					// printf("LAYER 2 STATUS 3\n");
-					printf("ZWIBIAS %d = (%d * %d)\n", zwibias, zi - zbias, wi - wbias);
+					// printf("ZWIBIAS %d = (%d * %d)\n", zwibias, zi - zbias, wi - wbias);
 					assert(zwibias < swapsize);
           swapzone[zwibias] = src1[xyi] * src2[zwi];
 					// printf("LAYER 2 STATUS 4\n");
@@ -124,13 +126,13 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
 	__syncthreads();
   for(int zi = zbase; zi < zbase + ze; zi++ ) {
     for(int wi = wbase; wi < wbase + we; wi++) {
-      if(zi < za) {
-        if(wi < wa) {
+      if(zi < zbias + zas && zi < za) {
+        if(wi < wbias + was && wi < wa) {
           int xzi = xi * za + zi;
           int ywi = yi * wa + wi;
           int ii = xzi * ywa + ywi;
           int zwi = zi * wa + wi;
-					int zwibias = (zi - zbias) * wa + (wi - wbias);
+					int zwibias = (zi - zbias) * SWAPMAX + (wi - wbias);
           dst[ii] = swapzone[zwibias];
         }
       }
@@ -247,12 +249,12 @@ int main(int argc, char* argv[]) {
 			dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa, zi, wi);
 			cudaDeviceSynchronize();
 			double sxstime = checkpointc();
-			std::cout<<"TIMING: "<<sxstime<<std::endl;
+			// std::cout<<"TIMING: "<<sxstime<<std::endl;
 			xstime += sxstime;
 		}
 	}
 	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
-#if 1 
+#if 0 
   for(int xzi = 0; xzi < xza; xzi++) {
     for(int ywi = 0; ywi < ywa; ywi++) {
       std::cout<<dstc3[xzi * ywa + ywi]<<" ";
