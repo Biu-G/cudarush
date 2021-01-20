@@ -112,7 +112,7 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
           int xyi = xi * ya + yi;
           int zwi = zi * wa + wi;
 					// printf("LAYER 2 STATUS 2\n");
-					int zwibias = (zi - zbias) * SWAPMAX + (wi - wbias);
+					int zwibias = (zi - zbias) * was + (wi - wbias);
 					// printf("LAYER 2 STATUS 3\n");
 					// printf("ZWIBIAS %d = (%d * %d)\n", zwibias, zi - zbias, wi - wbias);
 					assert(zwibias < swapsize);
@@ -132,7 +132,7 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
           int ywi = yi * wa + wi;
           int ii = xzi * ywa + ywi;
           int zwi = zi * wa + wi;
-					int zwibias = (zi - zbias) * SWAPMAX + (wi - wbias);
+					int zwibias = (zi - zbias) * was + (wi - wbias);
           dst[ii] = swapzone[zwibias];
         }
       }
