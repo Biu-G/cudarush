@@ -228,6 +228,7 @@ int main(int argc, char* argv[]) {
 	cudaDeviceSynchronize();
 	checkpointc();
 	dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa);
+	cudaDeviceSynchronize();
 	double xstime = checkpointc();
 	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
 #if 0 
