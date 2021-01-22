@@ -5,9 +5,20 @@
 #include "cuda.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
-#define SWAPMAX 40
+#define SWAPMAX 20
+#define STREAMAX 20
+// MAX SUPPORTTING 400 * 400
 bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
+}
+
+// helper function that wraps CUDA API calls, reports any error and exits
+void chkCUDAErr(cudaError_t error_id)                                                                                                                  
+{
+  if (error_id != CUDA_SUCCESS){
+    printf("CUDA ERROR :::%s\n", cudaGetErrorString(error_id));
+    exit(EXIT_FAILURE);
+  }
 }
 
 __device__ 
@@ -167,20 +178,33 @@ int main(int argc, char* argv[]) {
 	int aa = xa * ya * za * wa;
 	float* src1 = (float*)malloc(sizeof(float) * xa * ya);
 	float* src2 = (float*)malloc(sizeof(float) * za * wa);
+	float* hsrc1, * hsrc2;
+	cudaError_t  AllocErr;
+	AllocErr = cudaMallocHost((void**)&hsrc1, sizeof(float) * xa * ya);
+	if(AllocErr == cudaErrorMemoryAllocation) {
+		assert(false);
+	}
+  AllocErr = cudaMallocHost((void**)&hsrc2, sizeof(float) * za * wa);
+  if(AllocErr == cudaErrorMemoryAllocation) {
+    assert(false);
+  }
 	float* dstc = (float*)malloc(sizeof(float)* xa * ya * za * wa);
-	float* dsrc1, *dsrc2, *dstd, *dstd2;
+	float* dsrc1, *dsrc2, *dstd, *dstd2, *dstd3;
 	cudaMalloc((void**)&dsrc1, sizeof(float) * xa * ya);
   cudaMalloc((void**)&dsrc2, sizeof(float) * za * wa);
 	cudaMalloc((void**)&dstd, sizeof(float) * aa);
 	cudaMalloc((void**)&dstd2, sizeof(float) * aa);
+	cudaMalloc((void**)&dstd3, sizeof(float) * aa);
   /*float* dsrc1 = (float*)malloc(sizeof(float) * xa * ya);
   float* dsrc2 = (float*)malloc(sizeof(float) * za * wa);
 	float* dstd = (float*)malloc(sizeof(float)* xa * ya * za * wa);*/
 	float* dstc2 = (float*)malloc(sizeof(float)* aa);
 	float* dstc3 = (float*)malloc(sizeof(float)* aa);
+	float* dstc4 = (float*)malloc(sizeof(float)* aa);
 	std::cout<<"------SRC1 / SRC2--------"<<std::endl;
 	for(int xi = 0; xi < xa; xi++) {
 		for(int yi = 0; yi < ya; yi++) {
+			hsrc1[xi * ya + yi] = xi * ya + yi;
 			src1[xi * ya + yi] = xi * ya + yi;
 			std::cout<<src1[xi * ya + yi]<<" ";
 		}
@@ -190,6 +214,7 @@ int main(int argc, char* argv[]) {
 	  std::cout<<"------SRC1 / SRC2--------"<<std::endl;
   for(int zi = 0; zi < za; zi++) {
     for(int wi = 0; wi < wa; wi++) {
+			hsrc2[zi * wa + wi] = zi * wa + wi;
 			src2[zi * wa + wi] = zi * wa + wi;
       std::cout<<src2[zi * wa + wi]<<" ";
     }
@@ -256,12 +281,12 @@ int main(int argc, char* argv[]) {
 		for(int wi = 0; wi < wa; wi +=SWAPMAX) {
 			std::cout<<"DUP CAL for zbias / wbias "<<zi<<" / "<<wi<<std::endl;
 			dotgxs<<<grids, blocks>>>(dstd2, dsrc1, dsrc2, xa, ya, za, wa, zi, wi);
-			cudaDeviceSynchronize();
-			double sxstime = checkpointc();
-			// std::cout<<"TIMING: "<<sxstime<<std::endl;
-			xstime += sxstime;
+			// cudaDeviceSynchronize();
 		}
 	}
+	cudaDeviceSynchronize();
+  double sxstime = checkpointc();
+  xstime += sxstime;
 	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
 #if 0 
   for(int xzi = 0; xzi < xza; xzi++) {
@@ -276,4 +301,62 @@ int main(int argc, char* argv[]) {
 	std::cout<<"XS BENCHMARK "<< cstime / xstime <<" X"<<std::endl;
 	std::cout<<"GPU CPY BOOST "<<cstime / (xstime + (dstime - coretime))<<" X"<<std::endl;
 	std::cout<<"XS ALC "<< alc2<<std::endl;
+  cudaStream_t stream[STREAMAX * STREAMAX];
+	for(int zi = 0; zi < za; zi += SWAPMAX) {
+		for(int wi = 0; wi < wa; wi += SWAPMAX) {
+			int zis = zi / SWAPMAX;
+			int wis = wi / SWAPMAX;
+			int streamid = zis * STREAMAX + wis;
+			chkCUDAErr(cudaStreamCreate(&stream[streamid]));
+		}
+	}
+	// 待优化
+	checkpointc();
+	cudaMemcpy(dsrc1, hsrc1, sizeof(float) * xa * ya, cudaMemcpyHostToDevice);
+	float singlecpy = checkpointc();
+	std::cout<<"SINGLE CPY "<<singlecpy<<std::endl;
+  for(int zi = 0; zi < za; zi += SWAPMAX) {
+    for(int wi = 0; wi < wa; wi += SWAPMAX) {
+      int zis = zi / SWAPMAX;
+      int wis = wi / SWAPMAX;
+      int streamid = zis * STREAMAX + wis;
+			int zitop = std::min(zi + SWAPMAX, za);
+			int wisize = std::min(SWAPMAX, wa - wi);
+			for(int zii = zi; zii < zitop; zii++) {
+				int cpybias = (zii * wa + wi) * sizeof(float);
+				cudaMemcpyAsync(dsrc2 + cpybias, hsrc2 + cpybias, sizeof(float) * wisize, cudaMemcpyHostToDevice, stream[streamid]);
+			}
+			dotgxs<<<grids, blocks, 0, stream[streamid]>>>(dstd3, dsrc1 ,dsrc2, xa, ya, za, wa, zi, wi);
+    }
+  }
+	cudaDeviceSynchronize();
+	float halfrun = checkpointc();
+	std::cout<<"HALF RUN "<<halfrun<<std::endl;
+	cudaMemcpyAsync(dstc4,dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost);
+	float finalcpy = checkpointc();
+	std::cout<<"FINAL CPY "<<finalcpy<<std::endl;
+	bool alc3 = allclose(dstc, dstc4, aa);
+	std::cout<<"STEAM ALC "<<alc3<<std::endl;
+	std::cout<<"STREAM BOOST "<<cstime / (halfrun + finalcpy + singlecpy) <<" X"<<std::endl;
+  for(int zi = 0; zi < za; zi += SWAPMAX) {
+    for(int wi = 0; wi < wa; wi += SWAPMAX) {
+      int zis = zi / SWAPMAX;
+      int wis = wi / SWAPMAX;
+      int streamid = zis * STREAMAX + wis;
+      chkCUDAErr(cudaStreamDestroy(stream[streamid]));
+    }
+  }
+	free(src1);
+	free(src2);
+	cudaFreeHost(hsrc1);
+	cudaFreeHost(hsrc2);
+	free(dstc);
+	free(dstc2);
+	free(dstc3);
+	free(dstc4);
+	cudaFree(dsrc1);
+	cudaFree(dsrc2);
+	cudaFree(dstd);
+	cudaFree(dstd2);
+	cudaFree(dstd3);
 }
