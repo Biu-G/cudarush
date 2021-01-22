@@ -10,6 +10,14 @@ bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
 }
 
+__device__ 
+float filter[2][2] = {{0.7, 0.4}, 
+											{0.8, 0.9}};
+
+__constant__ 
+float cfilter[2][2] = {{0.7, 0.4},
+											{0.8, 0.9}};
+
 bool allclose(float*x, float*y, int s) {
 	for(int i=0;i<s;i++){
 		float fx = x[i];
@@ -238,6 +246,7 @@ int main(int argc, char* argv[]) {
 	std::cout<<"PARA GPU 0.05X"<<std::endl;
 	std::cout<<"TOTAL SPLIT 12X"<<std::endl;
 	std::cout<<"GPU BENCHMARK "<<cstime / coretime<<" X"<<std::endl;
+	std::cout<<"GPU CPY BOOST "<<cstime / dstime<<" X"<<std::endl;
 	std::cout<<"ALC: "<<alc<<std::endl;
 	std::cout<<"XS NOW"<<std::endl;
 	cudaDeviceSynchronize();
@@ -263,6 +272,8 @@ int main(int argc, char* argv[]) {
   }
 #endif
 	bool alc2 = allclose(dstc, dstc3, aa);
+	std::cout<<"XS CORETIME "<< xstime<<std::endl;
 	std::cout<<"XS BENCHMARK "<< cstime / xstime <<" X"<<std::endl;
+	std::cout<<"GPU CPY BOOST "<<cstime / (xstime + (dstime - coretime))<<" X"<<std::endl;
 	std::cout<<"XS ALC "<< alc2<<std::endl;
 }
