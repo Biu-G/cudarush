@@ -5,7 +5,7 @@
 #include "cuda.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
-#define SWAPMAX 20
+#define SWAPMAX 2
 #define STREAMAX 20
 // MAX SUPPORTTING 400 * 400
 bool fcc(float x, float y, float threshold = 1e-4) {
@@ -43,25 +43,6 @@ bool allclose(float*x, float*y, int s) {
 	return true;
 }
 
-__global__ void dotg(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
-  //xy * zw -> xz * yw
-  int ywa = ya * wa;
-  for(int xi = 0; xi < xa; xi++) {
-    for(int yi = 0; yi < ya; yi++) {
-      for(int zi = 0; zi < za; zi++) {
-        for(int wi = 0; wi < wa; wi++) {
-          int xzi = xi * za + zi;
-          int ywi = yi * wa + wi;
-          int ii = xzi * ywa + ywi;
-          int xyi = xi * ya + yi;
-          int zwi = zi * wa + wi;
-          dst[ii] = src1[xyi] * src2[zwi];
-        }
-      }
-    }
-  }
-}
-
 void dotc(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
 	//xy * zw -> xz * yw
 	int ywa = ya * wa;
@@ -69,8 +50,8 @@ void dotc(float*dst, float*src1, float*src2, int xa, int ya, int za, int wa) {
 		for(int yi = 0; yi < ya; yi++) {
 			for(int zi = 0; zi < za; zi++) {
 				for(int wi = 0; wi < wa; wi++) {
-					int xzi = xi * za + zi;
-					int ywi = yi * wa + wi;
+					int xzi = xi + zi * xa;
+					int ywi = yi + wi * ya;
 					int ii = xzi * ywa + ywi;
 					int xyi = xi * ya + yi;
 					int zwi = zi * wa + wi;
@@ -95,8 +76,8 @@ __global__ void dotgs(float*dst, float*src1, float*src2, int xa, int ya, int za,
 		for(int wi = wbase; wi < wbase + we; wi++) {
 			if(zi < za) {
 				if(wi < wa) {
-          int xzi = xi * za + zi;
-          int ywi = yi * wa + wi;
+          int xzi = xi + zi * xa;
+          int ywi = yi + wi * ya;
           int ii = xzi * ywa + ywi;
           int xyi = xi * ya + yi;
           int zwi = zi * wa + wi;
@@ -147,8 +128,8 @@ __global__ void dotgxs(float*dst, float*src1, float*src2, int xa, int ya, int za
     for(int wi = wbase; wi < wbase + we; wi++) {
       if(zi < zbias + zas && zi < za) {
         if(wi < wbias + was && wi < wa) {
-          int xzi = xi * za + zi;
-          int ywi = yi * wa + wi;
+          int xzi = xi + zi * xa;
+          int ywi = yi + wi * ya;
           int ii = xzi * ywa + ywi;
           int zwi = zi * wa + wi;
 					int zwibias = (zi - zbias) * was + (wi - wbias);
@@ -322,18 +303,20 @@ int main(int argc, char* argv[]) {
       int streamid = zis * STREAMAX + wis;
 			int zitop = std::min(zi + SWAPMAX, za);
 			int wisize = std::min(SWAPMAX, wa - wi);
+			int zisize = zitop - zi;
 			for(int zii = zi; zii < zitop; zii++) {
 				int cpybias = (zii * wa + wi) * sizeof(float);
 				cudaMemcpyAsync(dsrc2 + cpybias, hsrc2 + cpybias, sizeof(float) * wisize, cudaMemcpyHostToDevice, stream[streamid]);
 			}
 			dotgxs<<<grids, blocks, 0, stream[streamid]>>>(dstd3, dsrc1 ,dsrc2, xa, ya, za, wa, zi, wi);
-			for(int xi = 0; xi < xa; xi++) {
-				for(int yi = 0; yi < ya; yi++) {
-					for(int zii = zi; zii < zitop; zii++) {
-						int cpybias = ((xi * za + zii) * ywa + (yi * wa + wi)) * sizeof(float);
-						cudaMemcpyAsync(dstc4 + cpybias, dstd3 + cpybias, sizeof(float) * wisize, cudaMemcpyDeviceToHost, stream[streamid]);
-					}
-				}
+			int zimax = zi * xa + zisize * xa;
+			int cpysize = wisize * ya;
+			int ywi = wi * ya;
+			std::cout<<std::endl<<"STOPPING POWER for z/w "<<zi<<" "<<wi<<std::endl<<std::endl;
+			for(int xzi = zi * xa; xzi < zimax; xzi++) {
+				int cpybias = (xzi * ywa + ywi) * sizeof(float);
+				std::cout<<"WRITING BACK at "<<(xzi * ywa + ywi)<<" for "<<cpysize<<std::endl;
+				cudaMemcpyAsync(dstc4 + cpybias, dstd3 + cpybias, sizeof(float) * cpysize, cudaMemcpyDeviceToHost, stream[streamid]);
 			}
     }
   }
@@ -343,6 +326,14 @@ int main(int argc, char* argv[]) {
 	// cudaMemcpyAsync(dstc4,dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost);
 	float finalcpy = checkpointc();
 	std::cout<<"FINAL CPY "<<finalcpy<<std::endl;
+#if 1
+  for(int xzi = 0; xzi < xza; xzi++) {
+    for(int ywi = 0; ywi < ywa; ywi++) {
+      std::cout<<dstc4[xzi * ywa + ywi]<<" ";
+    }
+    std::cout<<std::endl;
+  }
+#endif
 	bool alc3 = allclose(dstc, dstc4, aa);
 	std::cout<<"STEAM ALC "<<alc3<<std::endl;
 	std::cout<<"STREAM BOOST "<<cstime / (halfrun + finalcpy + singlecpy) <<" X"<<std::endl;
