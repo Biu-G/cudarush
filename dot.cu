@@ -327,12 +327,20 @@ int main(int argc, char* argv[]) {
 				cudaMemcpyAsync(dsrc2 + cpybias, hsrc2 + cpybias, sizeof(float) * wisize, cudaMemcpyHostToDevice, stream[streamid]);
 			}
 			dotgxs<<<grids, blocks, 0, stream[streamid]>>>(dstd3, dsrc1 ,dsrc2, xa, ya, za, wa, zi, wi);
+			for(int xi = 0; xi < xa; xi++) {
+				for(int yi = 0; yi < ya; yi++) {
+					for(int zii = zi; zii < zitop; zii++) {
+						int cpybias = ((xi * za + zii) * ywa + (yi * wa + wi)) * sizeof(float);
+						cudaMemcpyAsync(dstc4 + cpybias, dstd3 + cpybias, sizeof(float) * wisize, cudaMemcpyDeviceToHost, stream[streamid]);
+					}
+				}
+			}
     }
   }
 	cudaDeviceSynchronize();
 	float halfrun = checkpointc();
 	std::cout<<"HALF RUN "<<halfrun<<std::endl;
-	cudaMemcpyAsync(dstc4,dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost);
+	// cudaMemcpyAsync(dstc4,dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost);
 	float finalcpy = checkpointc();
 	std::cout<<"FINAL CPY "<<finalcpy<<std::endl;
 	bool alc3 = allclose(dstc, dstc4, aa);
