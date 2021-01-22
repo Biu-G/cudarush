@@ -5,8 +5,9 @@
 #include "cuda.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
-#define SWAPMAX 2
+#define SWAPMAX 20
 #define STREAMAX 20
+// WHILE BIG STREAMCNT WILL CAUSE ERR (MAY LESS than 20 OR SO)
 // MAX SUPPORTTING 400 * 400
 bool fcc(float x, float y, float threshold = 1e-4) {
   return abs(x - y) < threshold;
@@ -183,6 +184,7 @@ int main(int argc, char* argv[]) {
 	float* dstc3 = (float*)malloc(sizeof(float)* aa);
 	float* dstc4 = (float*)malloc(sizeof(float)* aa);
 	std::cout<<"------SRC1 / SRC2--------"<<std::endl;
+#if 0
 	for(int xi = 0; xi < xa; xi++) {
 		for(int yi = 0; yi < ya; yi++) {
 			hsrc1[xi * ya + yi] = xi * ya + yi;
@@ -192,7 +194,7 @@ int main(int argc, char* argv[]) {
 		std::cout<<std::endl;
 	}
 	std::cout<<"+++++THRES+++++++"<<std::endl;
-	  std::cout<<"------SRC1 / SRC2--------"<<std::endl;
+	  std::cout<<"------SRC2--------"<<std::endl;
   for(int zi = 0; zi < za; zi++) {
     for(int wi = 0; wi < wa; wi++) {
 			hsrc2[zi * wa + wi] = zi * wa + wi;
@@ -201,6 +203,7 @@ int main(int argc, char* argv[]) {
     }
 		std::cout<<std::endl;
 	}
+#endif
 	std::cout<<"SRC ->CPU -> DST"<<std::endl;
 	checkpointc();
 	dotc(dstc, src1 ,src2, xa, ya, za, wa);
@@ -269,7 +272,7 @@ int main(int argc, char* argv[]) {
   double sxstime = checkpointc();
   xstime += sxstime;
 	cudaMemcpy(dstc3, dstd2, sizeof(float) * aa, cudaMemcpyDeviceToHost);
-#if 0 
+#if 0
   for(int xzi = 0; xzi < xza; xzi++) {
     for(int ywi = 0; ywi < ywa; ywi++) {
       std::cout<<dstc3[xzi * ywa + ywi]<<" ";
@@ -283,50 +286,53 @@ int main(int argc, char* argv[]) {
 	std::cout<<"GPU CPY BOOST "<<cstime / (xstime + (dstime - coretime))<<" X"<<std::endl;
 	std::cout<<"XS ALC "<< alc2<<std::endl;
   cudaStream_t stream[STREAMAX * STREAMAX];
+	int streamido = (wa + SWAPMAX - 1) / SWAPMAX;
 	for(int zi = 0; zi < za; zi += SWAPMAX) {
 		for(int wi = 0; wi < wa; wi += SWAPMAX) {
 			int zis = zi / SWAPMAX;
 			int wis = wi / SWAPMAX;
-			int streamid = zis * STREAMAX + wis;
+			int streamid = zis * streamido + wis;
 			chkCUDAErr(cudaStreamCreate(&stream[streamid]));
 		}
 	}
 	// 待优化
 	checkpointc();
 	cudaMemcpy(dsrc1, hsrc1, sizeof(float) * xa * ya, cudaMemcpyHostToDevice);
+	cudaMemcpy(dsrc2, hsrc2, sizeof(float) * xa * ya, cudaMemcpyHostToDevice);
 	float singlecpy = checkpointc();
 	std::cout<<"SINGLE CPY "<<singlecpy<<std::endl;
   for(int zi = 0; zi < za; zi += SWAPMAX) {
     for(int wi = 0; wi < wa; wi += SWAPMAX) {
       int zis = zi / SWAPMAX;
       int wis = wi / SWAPMAX;
-      int streamid = zis * STREAMAX + wis;
+      int streamid = zis * streamido + wis;
 			int zitop = std::min(zi + SWAPMAX, za);
 			int wisize = std::min(SWAPMAX, wa - wi);
 			int zisize = zitop - zi;
-			for(int zii = zi; zii < zitop; zii++) {
+			/*for(int zii = zi; zii < zitop; zii++) {
 				int cpybias = (zii * wa + wi) * sizeof(float);
 				cudaMemcpyAsync(dsrc2 + cpybias, hsrc2 + cpybias, sizeof(float) * wisize, cudaMemcpyHostToDevice, stream[streamid]);
-			}
+			}*/
 			dotgxs<<<grids, blocks, 0, stream[streamid]>>>(dstd3, dsrc1 ,dsrc2, xa, ya, za, wa, zi, wi);
 			int zimax = zi * xa + zisize * xa;
 			int cpysize = wisize * ya;
 			int ywi = wi * ya;
-			std::cout<<std::endl<<"STOPPING POWER for z/w "<<zi<<" "<<wi<<std::endl<<std::endl;
+			// std::cout<<std::endl<<"STOPPING POWER for z/w "<<zi<<" "<<wi<<std::endl<<std::endl;
 			for(int xzi = zi * xa; xzi < zimax; xzi++) {
-				int cpybias = (xzi * ywa + ywi) * sizeof(float);
-				std::cout<<"WRITING BACK at "<<(xzi * ywa + ywi)<<" for "<<cpysize<<std::endl;
+				int cpybias = (xzi * ywa + ywi);
+				// std::cout<<"WRITING BACK at "<<(xzi * ywa + ywi)<<" for "<<cpysize<<std::endl;
 				cudaMemcpyAsync(dstc4 + cpybias, dstd3 + cpybias, sizeof(float) * cpysize, cudaMemcpyDeviceToHost, stream[streamid]);
 			}
     }
   }
+	cudaMemcpyAsync(dstc4, dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost, stream[0]);
 	cudaDeviceSynchronize();
 	float halfrun = checkpointc();
 	std::cout<<"HALF RUN "<<halfrun<<std::endl;
 	// cudaMemcpyAsync(dstc4,dstd3, sizeof(float) * aa, cudaMemcpyDeviceToHost);
 	float finalcpy = checkpointc();
 	std::cout<<"FINAL CPY "<<finalcpy<<std::endl;
-#if 1
+#if 0
   for(int xzi = 0; xzi < xza; xzi++) {
     for(int ywi = 0; ywi < ywa; ywi++) {
       std::cout<<dstc4[xzi * ywa + ywi]<<" ";
@@ -341,7 +347,7 @@ int main(int argc, char* argv[]) {
     for(int wi = 0; wi < wa; wi += SWAPMAX) {
       int zis = zi / SWAPMAX;
       int wis = wi / SWAPMAX;
-      int streamid = zis * STREAMAX + wis;
+      int streamid = zis * streamido + wis;
       chkCUDAErr(cudaStreamDestroy(stream[streamid]));
     }
   }
