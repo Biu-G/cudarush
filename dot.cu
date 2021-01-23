@@ -3,6 +3,8 @@
 #include <memory>
 #include <assert.h>
 #include "cuda.h"
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
 #define PR
 #define CEIL(x,y) ((x+y-1)/y)
 #define SWAPMAX 20
@@ -364,4 +366,14 @@ int main(int argc, char* argv[]) {
 	cudaFree(dstd);
 	cudaFree(dstd2);
 	cudaFree(dstd3);
+	int count;
+	cudaDeviceProp prob;
+	cudaGetDeviceCount(&count);
+	for(int i=0; i< count; i++) {
+		cudaGetDeviceProperties(&prob, i);
+		std::cout<<std::endl<<"DEV PRO "<<std::endl;
+		std::cout<<"NAME "<<prob.name<<std::endl;
+		std::cout<<"COMPUTE COMPABILITY "<<prob.major<<" X "<<prob.minor<<std::endl;
+		std::cout<<"CLOCK RATE "<<prob.clockRate<<std::endl;
+	}
 }
